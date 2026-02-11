@@ -12,6 +12,7 @@
 #include <logging.h>
 #include <node/context.h>
 #include <node/kernel_notifications.h>
+#include <rpc/response_filter.h>
 #include <rpc/server_util.h>
 #include <rpc/util.h>
 #include <sync.h>
@@ -35,6 +36,7 @@ static GlobalMutex g_rpc_warmup_mutex;
 static std::atomic<bool> g_rpc_running{false};
 static bool fRPCInWarmup GUARDED_BY(g_rpc_warmup_mutex) = true;
 static std::string rpcWarmupStatus GUARDED_BY(g_rpc_warmup_mutex) = "RPC server started";
+static rpc::StripFieldConfig g_rpc_stripfield_config;
 static bool ExecuteCommand(const CRPCCommand& command, const JSONRPCRequest& request, UniValue& result, bool last_handler);
 
 struct RPCCommandExecutionInfo
@@ -272,6 +274,15 @@ bool CRPCTable::removeCommand(const std::string& name, const CRPCCommand* pcmd)
 
 void StartRPC()
 {
+    g_rpc_stripfield_config = rpc::LoadStripFieldConfig(gArgs);
+    CHECK_NONFATAL(g_rpc_stripfield_config.InvalidRules().empty());
+    if (!g_rpc_stripfield_config.Empty()) {
+        LogDebug(BCLog::RPC, "Loaded %u -rpcstripfield rules (%u global, %u method-specific)\n",
+                 static_cast<unsigned>(g_rpc_stripfield_config.RuleCount()),
+                 static_cast<unsigned>(g_rpc_stripfield_config.GlobalRuleCount()),
+                 static_cast<unsigned>(g_rpc_stripfield_config.MethodRuleCount()));
+    }
+
     LogDebug(BCLog::RPC, "Starting RPC\n");
     g_rpc_running = true;
 }
@@ -358,6 +369,7 @@ UniValue JSONRPCExec(const JSONRPCRequest& jreq, bool catch_errors)
         result = tableRPC.execute(jreq);
     }
 
+    rpc::ApplyStripFieldRules(g_rpc_stripfield_config, jreq.strMethod, result);
     return JSONRPCReplyObj(std::move(result), NullUniValue, jreq.id, jreq.m_json_version);
 }
 

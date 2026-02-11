@@ -209,6 +209,7 @@ BASE_SCRIPTS = [
     'interface_usdt_validation.py',
     'rpc_users.py',
     'rpc_whitelist.py',
+    'rpc_stripfield.py',
     'feature_proxy.py',
     'wallet_signrawtransactionwithwallet.py',
     'rpc_signrawtransactionwithkey.py',
