@@ -26,6 +26,22 @@ In contrast to the command-line usage:
 - an option must be specified without leading `-`;
 - a value of the given option is mandatory; e.g., `testnet=1` (for chain selection options), `noconnect=1` (for negated options).
 
+### Repeated options
+
+Some options can be specified multiple times to build a list of values. One example is `rpcstripfield`, which removes fields from successful JSON-RPC `result` objects:
+
+```
+rpcstripfield=getrawtransaction:blockhash
+rpcstripfield=getrawtransaction:vout[].scriptPubKey.address
+rpcstripfield=*:warnings
+```
+
+`rpcstripfield` values use the format `<method>:<path>`:
+- `<method>` is the RPC method name, or `*` to apply to all methods.
+- `<path>` is a dot-separated path in the RPC `result` object.
+- `[]` applies to all array elements.
+- `[n]` applies to one array index.
+
 ### Blank lines
 
 Blank lines are allowed and ignored by the parser.

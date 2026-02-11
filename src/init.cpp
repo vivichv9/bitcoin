@@ -65,6 +65,7 @@
 #include <protocol.h>
 #include <rpc/blockchain.h>
 #include <rpc/register.h>
+#include <rpc/response_filter.h>
 #include <rpc/server.h>
 #include <rpc/util.h>
 #include <scheduler.h>
@@ -694,6 +695,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-rpcauth=<userpw>", "Username and HMAC-SHA-256 hashed password for JSON-RPC connections. The field <userpw> comes in the format: <USERNAME>:<SALT>$<HASH>. A canonical python script is included in share/rpcauth. The client then connects normally using the rpcuser=<USERNAME>/rpcpassword=<PASSWORD> pair of arguments. This option can be specified multiple times", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::RPC);
     argsman.AddArg("-rpcbind=<addr>[:port]", "Bind to given address to listen for JSON-RPC connections. Do not expose the RPC server to untrusted networks such as the public internet! This option is ignored unless -rpcallowip is also passed. Port is optional and overrides -rpcport. Use [host]:port notation for IPv6. This option can be specified multiple times (default: 127.0.0.1 and ::1 i.e., localhost)", ArgsManager::ALLOW_ANY | ArgsManager::NETWORK_ONLY, OptionsCategory::RPC);
     argsman.AddArg("-rpcdoccheck", strprintf("Throw a non-fatal error at runtime if the documentation for an RPC is incorrect (default: %u)", DEFAULT_RPC_DOC_CHECK), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::RPC);
+    argsman.AddArg("-rpcstripfield=<method:path>", "Remove JSON fields from successful RPC results. <method> is the RPC method name or '*' for all methods. <path> is a dot-separated path in the RPC result supporting object keys and array selectors '[]' and '[n]' (for example: getrawtransaction:blockhash, getrawtransaction:vout[].scriptPubKey.address). This option can be specified multiple times", ArgsManager::ALLOW_ANY, OptionsCategory::RPC);
     argsman.AddArg("-rpccookiefile=<loc>", "Location of the auth cookie. Relative paths will be prefixed by a net-specific datadir location. (default: data dir)", ArgsManager::ALLOW_ANY, OptionsCategory::RPC);
     argsman.AddArg("-rpccookieperms=<readable-by>", strprintf("Set permissions on the RPC auth cookie file so that it is readable by [owner|group|all] (default: owner [via umask 0077])"), ArgsManager::ALLOW_ANY, OptionsCategory::RPC);
     argsman.AddArg("-rpcpassword=<pw>", "Password for JSON-RPC connections", ArgsManager::ALLOW_ANY | ArgsManager::SENSITIVE, OptionsCategory::RPC);
@@ -1080,6 +1082,13 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     nBytesPerSigOp = args.GetIntArg("-bytespersigop", nBytesPerSigOp);
 
     if (!g_wallet_init_interface.ParameterInteraction()) return false;
+
+    {
+        std::string rpc_stripfield_error;
+        if (!rpc::ValidateStripFieldConfig(args, rpc_stripfield_error)) {
+            return InitError(Untranslated(rpc_stripfield_error));
+        }
+    }
 
     // Option to startup with mocktime set (used for regression testing):
     if (const auto mocktime{args.GetIntArg("-mocktime")}) {
