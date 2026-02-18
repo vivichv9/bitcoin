@@ -1,0 +1,82 @@
+FROM fedora:40
+
+ARG JOBS=0
+ARG LIBEVENT_VERSION=2.1.12-stable
+ARG LIBEVENT_SHA256=92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb
+
+WORKDIR /src
+
+COPY . .
+
+RUN set -eux; \
+    dnf -y install \
+      gcc-c++ \
+      make \
+      cmake \
+      ninja-build \
+      pkgconf-pkg-config \
+      binutils \
+      curl \
+      patch \
+      boost-devel \
+      boost-static \
+      openssl-devel \
+      zlib-static \
+      glibc-static \
+      libstdc++-static \
+      libevent-devel; \
+    LIBEVENT_TARBALL="libevent-${LIBEVENT_VERSION}.tar.gz"; \
+    mkdir -p /src/depends/offline-sources; \
+    curl -L "https://github.com/libevent/libevent/releases/download/release-${LIBEVENT_VERSION}/${LIBEVENT_TARBALL}" \
+      -o "/src/depends/offline-sources/${LIBEVENT_TARBALL}"; \
+    echo "${LIBEVENT_SHA256}  /src/depends/offline-sources/${LIBEVENT_TARBALL}" | sha256sum -c -; \
+    rm -rf /tmp/libevent-src; \
+    mkdir -p /tmp/libevent-src; \
+    tar -xf "/src/depends/offline-sources/${LIBEVENT_TARBALL}" -C /tmp/libevent-src --strip-components=1; \
+    cd /tmp/libevent-src; \
+    patch -p1 < /src/depends/patches/libevent/cmake_fixups.patch; \
+    patch -p1 < /src/depends/patches/libevent/netbsd_fixup.patch; \
+    patch -p1 < /src/depends/patches/libevent/winver_fixup.patch; \
+    cmake -S . -B build -G "Unix Makefiles" \
+      -DCMAKE_BUILD_TYPE=None \
+      -DCMAKE_INSTALL_LIBDIR=lib \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=TRUE \
+      -DEVENT__DISABLE_BENCHMARK=ON \
+      -DEVENT__DISABLE_OPENSSL=ON \
+      -DEVENT__DISABLE_SAMPLES=ON \
+      -DEVENT__DISABLE_REGRESS=ON \
+      -DEVENT__DISABLE_TESTS=ON \
+      -DEVENT__LIBRARY_TYPE=STATIC \
+      -DCMAKE_INSTALL_PREFIX=/usr/local; \
+    cmake --build build -j"$(nproc)"; \
+    cmake --install build; \
+    ldconfig; \
+    cd /src
+
+RUN set -eux; \
+    if [ "${JOBS}" = "0" ]; then JOBS="$(nproc)"; fi; \
+    cmake -B build -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_EXE_LINKER_FLAGS="-static" \
+      -DBoost_USE_STATIC_LIBS=ON \
+      -DLibevent_ROOT=/usr/local \
+      -DLibevent_USE_STATIC_LIBS=ON \
+      -DEVENT_INCLUDE_DIR=/usr/local/include \
+      -DEVENT_LIBRARY=/usr/local/lib/libevent_core.a \
+      -DEVENT_EXTRA_LIBRARY=/usr/local/lib/libevent_extra.a \
+      -DBUILD_DAEMON=ON \
+      -DBUILD_CLI=ON \
+      -DBUILD_TX=OFF \
+      -DBUILD_UTIL=OFF \
+      -DBUILD_TESTS=OFF \
+      -DBUILD_BENCH=OFF \
+      -DBUILD_FUZZ_BINARY=OFF \
+      -DENABLE_WALLET=OFF \
+      -DWITH_ZMQ=OFF \
+      -DENABLE_IPC=OFF; \
+    cmake --build build --target bitcoind bitcoin-cli -j"${JOBS}"; \
+    strip build/bin/bitcoind; \
+    ! readelf -d build/bin/bitcoind | grep -q NEEDED
+
+CMD ["/bin/sh"]
