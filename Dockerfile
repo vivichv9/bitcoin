@@ -1,66 +1,46 @@
-FROM alpine:3.21
+FROM fedora:40
 
-ARG ALPINE_REPO_BASE=https://mirrors.edge.kernel.org/alpine
-ARG ALPINE_VERSION=v3.21
-ARG ALPINE_REPO_TOKEN=
 ARG JOBS=0
 
 WORKDIR /src
 
-COPY certs/ /usr/local/share/ca-certificates/
-
-RUN set -eux; \
-    if [ -n "${ALPINE_REPO_TOKEN}" ]; then \
-      AUTH_REPO_BASE="$(echo "${ALPINE_REPO_BASE}" | sed "s#^https://#https://token:${ALPINE_REPO_TOKEN}@#")"; \
-    else \
-      AUTH_REPO_BASE="${ALPINE_REPO_BASE}"; \
-    fi; \
-    printf '%s\n' \
-      "${AUTH_REPO_BASE}/${ALPINE_VERSION}/main" \
-      "${AUTH_REPO_BASE}/${ALPINE_VERSION}/community" \
-      > /etc/apk/repositories; \
-    apk add --no-cache \
-    bash \
-    bison \
-    build-base \
-    ca-certificates \
-    cmake \
-    curl \
-    linux-headers \
-    make \
-    patch \
-    pkgconf \
-    python3 \
-    samurai \
-    xz; \
-    update-ca-certificates; \
-    printf '%s\n' \
-      "${ALPINE_REPO_BASE}/${ALPINE_VERSION}/main" \
-      "${ALPINE_REPO_BASE}/${ALPINE_VERSION}/community" \
-      > /etc/apk/repositories
-
+# Local libevent source archive (for static build) is expected here.
+COPY local-src/ /src/local-src/
 COPY . .
 
 RUN set -eux; \
-    test -d /src/depends/offline-sources; \
-    test -d /src/depends/offline-sources/download-stamps; \
+    dnf -y install \
+      gcc-c++ \
+      make \
+      cmake \
+      ninja-build \
+      pkgconf-pkg-config \
+      binutils \
+      boost-devel \
+      boost-static \
+      openssl-devel \
+      zlib-static \
+      glibc-static \
+      libstdc++-static \
+      libevent-devel; \
+    if ! find /usr/lib64 -name 'libevent_core.a' -print -quit | grep -q .; then \
+      tar -xf /src/local-src/libevent-2.1.11-stable.tar.gz -C /tmp; \
+      LIBEVENT_DIR="$(find /tmp -maxdepth 1 -type d -name 'libevent-*' | head -n 1)"; \
+      test -n "${LIBEVENT_DIR}"; \
+      cd "${LIBEVENT_DIR}"; \
+      ./configure --disable-shared --enable-static --prefix=/usr/local; \
+      make -j"$(nproc)"; \
+      make install; \
+      cd /src; \
+    fi;
+
+RUN set -eux; \
     if [ "${JOBS}" = "0" ]; then JOBS="$(nproc)"; fi; \
-    HOST_TRIPLET="$(/src/depends/config.guess)"; \
-    make -C depends -j"${JOBS}" \
-      HOST="${HOST_TRIPLET}" \
-      SOURCES_PATH="/src/depends/offline-sources" \
-      build_linux_DOWNLOAD=false \
-      NO_QT=1 \
-      NO_WALLET=1 \
-      NO_ZMQ=1 \
-      NO_USDT=1 \
-      NO_IPC=1; \
     cmake -B build -G Ninja \
-      --toolchain="depends/${HOST_TRIPLET}/toolchain.cmake" \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_EXE_LINKER_FLAGS="-static" \
       -DBUILD_DAEMON=ON \
-      -DBUILD_CLI=ON \
+      -DBUILD_CLI=OFF \
       -DBUILD_TX=OFF \
       -DBUILD_UTIL=OFF \
       -DBUILD_TESTS=OFF \
@@ -69,7 +49,7 @@ RUN set -eux; \
       -DENABLE_WALLET=OFF \
       -DWITH_ZMQ=OFF \
       -DENABLE_IPC=OFF; \
-    cmake --build build --target bitcoind bitcoin-cli -j"${JOBS}"; \
+    cmake --build build --target bitcoind -j"${JOBS}"; \
     strip build/bin/bitcoind; \
     ! readelf -d build/bin/bitcoind | grep -q NEEDED
 
